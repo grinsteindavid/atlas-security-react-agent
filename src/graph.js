@@ -9,11 +9,10 @@ import { writeTrace } from "./reporter.js";
  * @param {object} state
  */
 async function probeNode(state) {
-  const observations = [];
-  observations.push(await httpGet(state, "/"));
-  observations.push(await inspectHeaders(state));
-  observations.push(await provokeError(state, "/api/Feedbacks"));
-  return { observations };
+  await httpGet(state, "/");
+  await inspectHeaders(state);
+  await provokeError(state, "/api/Feedbacks");
+  return {};
 }
 
 /**
@@ -25,6 +24,7 @@ async function cortexNode(state) {
   return {
     decision: res.decision,
     reasoningLog: [...state.reasoningLog, res.log],
+    llmMeta: res.llmMeta ?? null,
   };
 }
 
