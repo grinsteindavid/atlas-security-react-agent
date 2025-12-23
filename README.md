@@ -80,3 +80,13 @@ docker compose run atlas-agent pnpm dev   # or npm run dev
 4. Wire StateGraph: start → probe (tools) → cortex → decision (probe/report) → reporter.  
 5. Add mock mode (recorded fixtures) for deterministic runs; default to Juice Shop for manual.  
 6. Run and review `reasoning_trace.json`; iterate on prompt and tool coverage.
+
+## Code structure (JS + JSDoc)
+- `src/config.js` — env/limits constants.  
+- `src/state.js` — state helpers for observations/logs.  
+- `src/httpClient.js` — axios client with cookie jar, body snippet helper.  
+- `src/tools.js` — deterministic tools (GET/POST/header audit/error provoke/timing), budget guard.  
+- `src/cortex.js` — reasoning node (OpenAI when key present, stub fallback).  
+- `src/reporter.js` — write `reasoning_trace.json`.  
+- `src/graph.js` — StateGraph wiring nodes.  
+- `src/index.js` — entrypoint to run once.

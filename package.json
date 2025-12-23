@@ -2,8 +2,11 @@
   "name": "atlas-security-react-agent",
   "version": "1.0.0",
   "description": "Lean MVP to learn attacker thinking with a deterministic ReAct loop over OWASP Juice Shop (or a mock target). Built with LangGraphJS + OpenAI.",
-  "main": "index.js",
+  "type": "module",
+  "main": "src/index.js",
   "scripts": {
+    "dev": "node src/index.js",
+    "start": "node src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -13,6 +16,7 @@
     "@langchain/langgraph": "^1.0.7",
     "@langchain/openai": "^1.2.0",
     "axios": "^1.13.2",
+    "axios-cookiejar-support": "^6.0.5",
     "tough-cookie": "^6.0.0"
   }
 }
