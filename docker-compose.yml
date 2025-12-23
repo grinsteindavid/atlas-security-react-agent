@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    container_name: atlas-juice-shop
+    restart: unless-stopped
+    ports:
+      - "${JUICE_SHOP_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+
+  atlas-agent:
+    profiles: ["agent"] # start with: docker compose --profile agent up
+    image: node:18-bullseye
+    container_name: atlas-agent
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    command: ["sleep", "infinity"] # placeholder until app code runs
+    environment:
+      - TARGET_URL=${TARGET_URL:-http://juice-shop:3000}
+      - OPENAI_API_KEY
+      - MAX_REQ_PER_RUN=${MAX_REQ_PER_RUN:-80}
+      - REQ_TIMEOUT_MS=${REQ_TIMEOUT_MS:-5000}
+    depends_on:
+      - juice-shop
