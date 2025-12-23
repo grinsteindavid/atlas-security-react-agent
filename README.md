@@ -32,6 +32,39 @@ Lean MVP to learn attacker thinking with a deterministic ReAct loop over OWASP J
 ## Reporter
 - Emits timestamped traces under `traces/trace-<runId>.json` (gitignored) with: run metadata (target, start/end), nodes visited, request budget used/max, observations, reasoning log, tool metrics, and LLM meta (attempts/fallback).
 
+### Sample trace (excerpt)
+```json
+{
+  "run_id": "2025-12-23T15-35-30-289Z",
+  "target": "http://juice-shop:3000",
+  "observations": [
+    {
+      "tool": "httpGet",
+      "label": "adminPage",
+      "url": "http://juice-shop:3000/#/administration",
+      "status": 200,
+      "latencyMs": 7
+    },
+    {
+      "tool": "httpPost",
+      "label": "feedbackProbe",
+      "url": "http://juice-shop:3000/api/Feedbacks",
+      "status": 500,
+      "note": "json"
+    }
+  ],
+  "reasoningLog": [
+    {
+      "owasp_category": "A1: Injection",
+      "observation_ref": "httpPost-…",
+      "confidence_0_1": 0.8
+    }
+  ],
+  "metrics": { "requests": 6, "perTool": { "httpGet": 3, "httpPost": 1, "inspectHeaders": 1, "provokeError": 1 } },
+  "llmMeta": { "attempts": 2, "usedFallback": false }
+}
+```
+
 ## Safety & scope
 - Target allowlist (env), max requests per run, per-request timeout, crawl depth limit.
 - Redact large bodies; cap captured bytes (e.g., 2 KB).

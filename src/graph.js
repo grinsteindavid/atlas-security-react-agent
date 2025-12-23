@@ -1,6 +1,6 @@
 import { StateGraph, START, END } from "@langchain/langgraph";
 import { createInitialState } from "./state.js";
-import { httpGet, inspectHeaders, provokeError } from "./tools.js";
+import { httpGet, httpPost, inspectHeaders, provokeError } from "./tools.js";
 import { runCortex } from "./cortex.js";
 import { writeTrace } from "./reporter.js";
 
@@ -11,6 +11,13 @@ import { writeTrace } from "./reporter.js";
 async function probeNode(state) {
   await httpGet(state, "/");
   await inspectHeaders(state);
+  await httpGet(state, "/#/administration", "adminPage");
+  await httpGet(state, "/api/Products", "productsApi");
+  await httpPost(state, "/api/Feedbacks", {
+    comment: "probe",
+    rating: 3,
+    UserId: 1,
+  }, "feedbackProbe");
   await provokeError(state, "/api/Feedbacks");
   return {};
 }
