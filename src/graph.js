@@ -46,15 +46,15 @@ function buildGraph() {
     channels: {
       observations: {
         value: (prev, updates) => [...prev, ...(updates ?? [])],
-        default: [],
+        default: () => [],
       },
       reasoningLog: {
         value: (prev, updates) => [...prev, ...(updates ?? [])],
-        default: [],
+        default: () => [],
       },
       decision: {
         value: (_prev, update) => update ?? "probe",
-        default: "probe",
+        default: () => "probe",
       },
     },
   });
