@@ -12,6 +12,11 @@ const MAX_REQ_PER_RUN = Number.parseInt(
 );
 
 /**
+ * Max decision hops per run.
+ */
+const MAX_HOPS = Number.parseInt(process.env.MAX_HOPS ?? "8", 10);
+
+/**
  * Per-request timeout in milliseconds.
  */
 const REQ_TIMEOUT_MS = Number.parseInt(
@@ -27,6 +32,7 @@ const BODY_SNIPPET_BYTES = 2000;
 export {
   TARGET_URL,
   MAX_REQ_PER_RUN,
+  MAX_HOPS,
   REQ_TIMEOUT_MS,
   BODY_SNIPPET_BYTES,
 };

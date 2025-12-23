@@ -21,6 +21,10 @@ async function writeTrace(state, path) {
     reasoningLog: state.reasoningLog,
     metrics: state.metrics,
     llmMeta: state.llmMeta,
+    decisions: state.decisions,
+    hops: state.hops,
+    stopReason: state.stopReason,
+    visitedPaths: state.visitedPaths,
     requestBudget: {
       used: state.metrics?.requests ?? 0,
       max: Number.parseInt(process.env.MAX_REQ_PER_RUN ?? "80", 10),

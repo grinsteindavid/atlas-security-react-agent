@@ -14,6 +14,10 @@ function createInitialState() {
       errors: [],
     },
     llmMeta: null,
+    visitedPaths: [],
+    hops: 0,
+    stopReason: null,
+    decisions: [],
   };
 }
 
