@@ -12,7 +12,7 @@ services:
 
   atlas-agent:
     profiles: ["agent"] # start with: docker compose --profile agent up
-    image: node:18-bullseye
+    image: node:20-bullseye
     container_name: atlas-agent
     working_dir: /workspace
     volumes:
