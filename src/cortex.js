@@ -61,6 +61,7 @@ async function runCortex(state) {
         "Schema: {decision, next_tool?, next_args?, thought, hypothesis, owasp_category, confidence_0_1, observation_ref}.\n" +
         "decision must be 'probe' or 'report'. If decision is 'probe', choose next_tool from allowlist and valid next_args.\n" +
         "Allowlist tools: http_get {path,label?}, http_post {path,body,label?}, inspect_headers {path}, provoke_error {path}, measure_timing {path,control,test}.\n" +
+        "Avoid revisiting the same path unless following up an error; prefer unvisited paths from suggestions.\n" +
         "Cite an observation_ref from the inputs. No exploit payloads. Respect remaining budget and hops.",
     },
     {
@@ -71,6 +72,14 @@ async function runCortex(state) {
         remainingBudget,
         remainingHops,
         visitedPaths: state.visitedPaths,
+        suggestions: [
+          { tool: "http_get", path: "/" },
+          { tool: "http_get", path: "/#/administration" },
+          { tool: "http_get", path: "/api/Products" },
+          { tool: "http_post", path: "/api/Feedbacks", body: { comment: "probe", rating: 3, UserId: 1 } },
+          { tool: "provoke_error", path: "/api/Feedbacks" },
+          { tool: "inspect_headers", path: "/" },
+        ],
       }),
     },
   ];
