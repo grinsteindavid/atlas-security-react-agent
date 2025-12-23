@@ -24,6 +24,35 @@ function buildUrl(path) {
 }
 
 /**
+ * Increment request metrics for a tool.
+ * @param {object} state
+ * @param {string} tool
+ * @param {number} count
+ */
+function incrementMetrics(state, tool, count = 1) {
+  if (!state.metrics) return;
+  state.metrics.requests += count;
+  state.metrics.perTool[tool] = (state.metrics.perTool[tool] ?? 0) + count;
+}
+
+/**
+ * Record an error in metrics.
+ * @param {object} state
+ * @param {string} tool
+ * @param {string} url
+ * @param {Error} err
+ */
+function recordError(state, tool, url, err) {
+  if (!state.metrics) return;
+  state.metrics.errors.push({
+    tool,
+    url,
+    message: err?.message ?? "unknown error",
+    timestamp: new Date().toISOString(),
+  });
+}
+
+/**
  * GET wrapper with observation logging.
  * @param {object} state
  * @param {string} path
@@ -32,9 +61,16 @@ function buildUrl(path) {
 async function httpGet(state, path, label = "httpGet") {
   checkBudget();
   requestCount += 1;
+  incrementMetrics(state, "httpGet");
   const url = buildUrl(path);
   const startedAt = Date.now();
-  const resp = await client.get(url);
+  let resp;
+  try {
+    resp = await client.get(url);
+  } catch (err) {
+    recordError(state, "httpGet", url, err);
+    throw err;
+  }
   return addObservation(
     state,
     toObservation(resp, { tool: "httpGet", label, url, method: "GET", startedAt })
@@ -51,11 +87,18 @@ async function httpGet(state, path, label = "httpGet") {
 async function httpPost(state, path, data, label = "httpPost") {
   checkBudget();
   requestCount += 1;
+  incrementMetrics(state, "httpPost");
   const url = buildUrl(path);
   const startedAt = Date.now();
-  const resp = await client.post(url, data, {
-    headers: { "Content-Type": "application/json" },
-  });
+  let resp;
+  try {
+    resp = await client.post(url, data, {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    recordError(state, "httpPost", url, err);
+    throw err;
+  }
   return addObservation(
     state,
     toObservation(resp, {
@@ -78,9 +121,16 @@ async function httpPost(state, path, data, label = "httpPost") {
 async function inspectHeaders(state, path = "/", label = "inspectHeaders") {
   checkBudget();
   requestCount += 1;
+  incrementMetrics(state, "inspectHeaders");
   const url = buildUrl(path);
   const startedAt = Date.now();
-  const resp = await client.get(url);
+  let resp;
+  try {
+    resp = await client.get(url);
+  } catch (err) {
+    recordError(state, "inspectHeaders", url, err);
+    throw err;
+  }
   return addObservation(
     state,
     toObservation(resp, {
@@ -103,12 +153,19 @@ async function inspectHeaders(state, path = "/", label = "inspectHeaders") {
 async function provokeError(state, path, label = "provokeError") {
   checkBudget();
   requestCount += 1;
+  incrementMetrics(state, "provokeError");
   const url = buildUrl(path);
   const startedAt = Date.now();
   const malformed = "{ bad: }";
-  const resp = await client.post(url, malformed, {
-    headers: { "Content-Type": "application/json" },
-  });
+  let resp;
+  try {
+    resp = await client.post(url, malformed, {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    recordError(state, "provokeError", url, err);
+    throw err;
+  }
   return addObservation(
     state,
     toObservation(resp, {
@@ -133,18 +190,31 @@ async function provokeError(state, path, label = "provokeError") {
 async function measureTiming(state, path, controlData, testData, label = "measureTiming") {
   checkBudget();
   requestCount += 2;
+  incrementMetrics(state, "measureTiming", 2);
   const url = buildUrl(path);
 
   const startCtrl = Date.now();
-  const ctrlResp = await client.post(url, controlData, {
-    headers: { "Content-Type": "application/json" },
-  });
+  let ctrlResp;
+  try {
+    ctrlResp = await client.post(url, controlData, {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    recordError(state, "measureTiming", url, err);
+    throw err;
+  }
   const ctrlElapsed = Date.now() - startCtrl;
 
   const startTest = Date.now();
-  const testResp = await client.post(url, testData, {
-    headers: { "Content-Type": "application/json" },
-  });
+  let testResp;
+  try {
+    testResp = await client.post(url, testData, {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    recordError(state, "measureTiming", url, err);
+    throw err;
+  }
   const testElapsed = Date.now() - startTest;
 
   const obs = addObservation(

@@ -3,10 +3,17 @@
  */
 function createInitialState() {
   return {
+    runId: new Date().toISOString().replace(/[:.]/g, "-"),
     observations: [],
     reasoningLog: [],
     decision: "probe",
     runStartedAt: new Date().toISOString(),
+    metrics: {
+      requests: 0,
+      perTool: {},
+      errors: [],
+    },
+    llmMeta: null,
   };
 }
 

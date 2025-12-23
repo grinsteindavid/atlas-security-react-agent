@@ -17,6 +17,11 @@ function stubDecision(state) {
       observation_ref: latest?.id ?? null,
       timestamp: new Date().toISOString(),
     },
+    llmMeta: {
+      attempts: 0,
+      usedFallback: true,
+      reason: "no_api_key",
+    },
   };
 }
 
@@ -88,6 +93,12 @@ async function runCortex(state) {
         observation_ref: latest?.id ?? null,
         timestamp: new Date().toISOString(),
       },
+      llmMeta: {
+        attempts,
+        usedFallback: true,
+        model: "gpt-4o-mini",
+        error: lastErr?.message ?? "unknown",
+      },
     };
   }
 
@@ -100,6 +111,11 @@ async function runCortex(state) {
       confidence_0_1: Number(parsed.confidence_0_1 ?? 0.3),
       observation_ref: parsed.observation_ref ?? latest?.id ?? null,
       timestamp: new Date().toISOString(),
+    },
+    llmMeta: {
+      attempts,
+      usedFallback: false,
+      model: "gpt-4o-mini",
     },
   };
 }

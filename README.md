@@ -30,7 +30,7 @@ Lean MVP to learn attacker thinking with a deterministic ReAct loop over OWASP J
 - Guardrails: no exploit payload suggestions; must cite `observation_ref`; confidence 0–1.
 
 ## Reporter
-- Emits `reasoning_trace.json` with run metadata (target, start/end, tool calls) and findings: `{owasp_category, evidence, severity_guess, suggested_next_probe?, observation_ref}`.
+- Emits timestamped traces under `traces/trace-<runId>.json` (gitignored) with: run metadata (target, start/end), nodes visited, request budget used/max, observations, reasoning log, tool metrics, and LLM meta (attempts/fallback).
 
 ## Safety & scope
 - Target allowlist (env), max requests per run, per-request timeout, crawl depth limit.

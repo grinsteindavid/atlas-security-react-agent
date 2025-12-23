@@ -44,6 +44,14 @@ async function reportNode(state) {
 function buildGraph() {
   const workflow = new StateGraph({
     channels: {
+      runId: {
+        value: (_prev, update) => update,
+        default: () => null,
+      },
+      runStartedAt: {
+        value: (_prev, update) => update,
+        default: () => null,
+      },
       observations: {
         value: (prev, updates) => [...prev, ...(updates ?? [])],
         default: () => [],
@@ -55,6 +63,14 @@ function buildGraph() {
       decision: {
         value: (_prev, update) => update ?? "probe",
         default: () => "probe",
+      },
+      metrics: {
+        value: (prev, update) => ({ ...(prev ?? {}), ...(update ?? {}) }),
+        default: () => ({ requests: 0, perTool: {}, errors: [] }),
+      },
+      llmMeta: {
+        value: (_prev, update) => update ?? null,
+        default: () => null,
       },
     },
   });
