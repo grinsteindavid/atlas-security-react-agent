@@ -1,4 +1,5 @@
-import fs from "fs/promises";
+import fs from "node:fs/promises";
+import { ChatOpenAI } from "@langchain/openai";
 
 /**
  * Extract security findings from observations.
@@ -154,6 +155,53 @@ function summarizeOwaspCategories(reasoningLog) {
 }
 
 /**
+ * Generate an executive summary using LLM.
+ * @param {object[]} findings
+ * @param {object[]} reasoningLog
+ * @param {object} metrics
+ * @returns {Promise<string>}
+ */
+async function generateSummary(findings, reasoningLog, metrics) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return "Summary unavailable (no API key).";
+  }
+
+  const model = new ChatOpenAI({
+    apiKey,
+    model: "gpt-4o-mini",
+    temperature: 0.3,
+  });
+
+  const prompt = `You are a security analyst. Write a brief executive summary (3-5 paragraphs) of this reconnaissance run.
+
+FINDINGS (${findings.length} total):
+${findings.map((f) => `- [${f.severity}] ${f.subtype}: ${f.path}`).join("\n")}
+
+KEY HYPOTHESES FROM REASONING:
+${reasoningLog.slice(-5).map((r) => `- ${r.hypothesis} (confidence: ${r.confidence_0_1})`).join("\n")}
+
+METRICS:
+- Requests: ${metrics.requests ?? 0}
+- Tools used: ${Object.entries(metrics.perTool ?? {}).map(([k, v]) => `${k}:${v}`).join(", ")}
+
+Write a summary covering:
+1. Overall security posture assessment
+2. Most critical findings and their impact
+3. Attack surface observations
+4. Recommended next steps
+
+Be concise and actionable.`;
+
+  try {
+    const res = await model.invoke([{ role: "user", content: prompt }]);
+    return res.content;
+  } catch (err) {
+    return `Summary generation failed: ${err.message}`;
+  }
+}
+
+/**
  * Persist the reasoning trace and observations to disk.
  * @param {object} state
  * @param {string} [path]
@@ -167,11 +215,20 @@ async function writeTrace(state, path) {
   const findings = extractFindings(state);
   const owaspSummary = summarizeOwaspCategories(state.reasoningLog);
 
+  // Generate executive summary
+  console.log("[report] generating executive summary...");
+  const executiveSummary = await generateSummary(
+    findings,
+    state.reasoningLog ?? [],
+    state.metrics ?? {}
+  );
+
   const payload = {
     run_id: state.runId,
     target: process.env.TARGET_URL ?? "http://juice-shop:3000",
     startedAt: state.runStartedAt,
     finishedAt: new Date().toISOString(),
+    executiveSummary,
     summary: {
       findingsCount: findings.length,
       owaspCategories: owaspSummary,
