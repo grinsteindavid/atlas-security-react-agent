@@ -1,5 +1,36 @@
+import { z } from "zod";
 import { ChatOpenAI } from "@langchain/openai";
-import { TARGET_URL, MAX_REQ_PER_RUN, MAX_HOPS } from "./config.js";
+import { MAX_REQ_PER_RUN, MAX_HOPS, MAX_HITS_PER_PATH } from "./config.js";
+import { ALLOWED_TOOLS } from "./constants.js";
+import { scorePath } from "./pathUtils.js";
+
+const CortexResponseSchema = z.object({
+  decision: z.enum(["probe", "report"]),
+  next_tool: z.enum(ALLOWED_TOOLS).optional(),
+  next_args: z
+    .object({
+      path: z.string().optional(),
+      label: z.string().optional(),
+      body: z.record(z.unknown()).optional(),
+      control: z.record(z.unknown()).optional(),
+      test: z.record(z.unknown()).optional(),
+    })
+    .optional(),
+  thought: z.string(),
+  hypothesis: z.string(),
+  owasp_category: z.string(),
+  confidence_0_1: z.number().min(0).max(1),
+  observation_ref: z.string().nullable(),
+});
+
+function validateCortexResponse(data) {
+  const result = CortexResponseSchema.safeParse(data);
+  if (!result.success) {
+    const errors = result.error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ");
+    throw new Error(`Schema validation failed: ${errors}`);
+  }
+  return result.data;
+}
 
 /**
  * Fallback decision when no LLM key is available.
@@ -47,38 +78,68 @@ async function runCortex(state) {
     "inspect_headers",
     "provoke_error",
     "measure_timing",
+    "captcha_fetch",
   ];
 
   const remainingBudget = Math.max(0, (MAX_REQ_PER_RUN ?? 0) - (state.metrics?.requests ?? 0));
   const remainingHops = Math.max(0, (MAX_HOPS ?? 0) - (state.hops ?? 0));
+  const candidateScores = state.candidates
+    .slice(0, 15)
+    .map((p) => scorePath(p, state))
+    .sort((a, b) => b.score - a.score);
+  const lastDecisions = state.decisions.slice(-5);
+  const pathStatsSummary = Object.entries(state.pathStats ?? {})
+    .map(([path, stat]) => ({
+      path,
+      hits: stat.hits ?? 0,
+      lastStatus: stat.lastStatus ?? null,
+      lastTool: stat.lastTool ?? null,
+    }))
+    .sort((a, b) => b.hits - a.hits)
+    .slice(0, 10);
 
   const prompt = [
     {
       role: "system",
       content:
-        "You are the Cortex of an attacker-simulation agent.\n" +
+        "You are the Cortex of an attacker-simulation agent targeting a web application.\n" +
         "Respond with RAW JSON only (no code fences, no prose).\n" +
         "Schema: {decision, next_tool?, next_args?, thought, hypothesis, owasp_category, confidence_0_1, observation_ref}.\n" +
         "decision must be 'probe' or 'report'. If decision is 'probe', choose next_tool from allowlist and valid next_args.\n" +
-        "Allowlist tools: http_get {path,label?}, http_post {path,body,label?}, inspect_headers {path}, provoke_error {path}, measure_timing {path,control,test}.\n" +
-        "Avoid revisiting the same path unless following up an error; prefer unvisited paths from suggestions.\n" +
+        "Allowlist tools: http_get {path,label?}, http_post {path,body,label?}, inspect_headers {path}, provoke_error {path}, measure_timing {path,control,test}, captcha_fetch {path}.\n\n" +
+        "STRATEGY:\n" +
+        "1. Start by exploring the seed response to discover the application structure (SPA routes, API endpoints, JS files).\n" +
+        "2. Prioritize API endpoints (/api/*, /rest/*, /v1/*, /graphql) - they expose data and auth flaws.\n" +
+        "3. Use candidateScores to pick high-score unvisited paths. NEVER repeat a path you already visited.\n" +
+        "4. After GET on an API endpoint returning JSON, try POST with empty body {} or provoke_error to surface stack traces.\n" +
+        "5. Look for auth endpoints (login, register, password, token, session, oauth) and test them.\n" +
+        "6. Use inspect_headers to check security headers, CORS policy, server info disclosure.\n" +
+        "7. Use diverse tools - don't just do http_get repeatedly. Vary: GET → inspect_headers → provoke_error → POST.\n" +
+        "8. If you see 401/403, note it as potential auth bypass target. If 500 with stack trace, note information disclosure.\n" +
+        "9. Look for sensitive paths: /admin, /debug, /config, /backup, /ftp, /.git, /swagger, /graphql.\n\n" +
         "Cite an observation_ref from the inputs. No exploit payloads. Respect remaining budget and hops.",
     },
     {
       role: "user",
       content: JSON.stringify({
-        target: TARGET_URL,
         observations: state.observations.slice(-5),
         remainingBudget,
         remainingHops,
         visitedPaths: state.visitedPaths,
-        suggestions: [
-          { tool: "http_get", path: "/" },
-          { tool: "http_get", path: "/#/administration" },
-          { tool: "http_get", path: "/api/Products" },
-          { tool: "http_post", path: "/api/Feedbacks", body: { comment: "probe", rating: 3, UserId: 1 } },
-          { tool: "provoke_error", path: "/api/Feedbacks" },
-          { tool: "inspect_headers", path: "/" },
+        recentPaths: state.visitedPaths.slice(-3),
+        candidates: state.candidates.slice(0, 10),
+        candidateScores,
+        lastDecisions,
+        pathStatsSummary,
+        captcha: state.captcha,
+        hints: [
+          "Pick paths from candidateScores with highest score (unvisited API/auth paths)",
+          "After http_get on API endpoint, follow up with provoke_error or http_post",
+          "Use inspect_headers on endpoints returning 401/403 to check auth mechanisms",
+          "Try http_post with {} body on API endpoints to test for missing auth",
+          "Fetch JavaScript files to discover more API endpoints",
+          "If you keep hitting same path, STOP and pick a different one from candidates",
+          "Look for patterns: /api/v1/*, /graphql, /swagger.json, /openapi.json",
         ],
       }),
     },
@@ -88,8 +149,7 @@ async function runCortex(state) {
     const res = await model.invoke(prompt);
     const text = res.content;
     const parsed = typeof text === "string" ? JSON.parse(text) : text;
-    if (!parsed?.decision) throw new Error("Missing decision");
-    return parsed;
+    return validateCortexResponse(parsed);
   }
 
   let parsed;
@@ -127,13 +187,10 @@ async function runCortex(state) {
     };
   }
 
-  const nextTool = allowedTools.includes(parsed.next_tool) ? parsed.next_tool : null;
-  const nextArgs = parsed.next_args && typeof parsed.next_args === "object" ? parsed.next_args : {};
-
   return {
-    decision: parsed.decision === "probe" ? "probe" : "report",
-    next_tool: nextTool,
-    next_args: nextArgs,
+    decision: parsed.decision,
+    next_tool: parsed.next_tool ?? null,
+    next_args: parsed.next_args ?? {},
     log: {
       thought: parsed.thought ?? "n/a",
       hypothesis: parsed.hypothesis ?? "n/a",

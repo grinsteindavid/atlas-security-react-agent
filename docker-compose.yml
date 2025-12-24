@@ -1,7 +1,7 @@
 version: "3.9"
 
 services:
-  juice-shop:
+  target:
     image: bkimminich/juice-shop:latest
     container_name: atlas-juice-shop
     restart: unless-stopped
@@ -17,11 +17,13 @@ services:
     working_dir: /workspace
     volumes:
       - ./:/workspace
-    command: ["sleep", "infinity"] # placeholder until app code runs
+    command: ["sh", "-c", "npm install && node src/index.js"]
     environment:
-      - TARGET_URL=${TARGET_URL:-http://juice-shop:3000}
+      - TARGET_URL=${TARGET_URL:-http://target:3000}
       - OPENAI_API_KEY
       - MAX_REQ_PER_RUN=${MAX_REQ_PER_RUN:-80}
       - REQ_TIMEOUT_MS=${REQ_TIMEOUT_MS:-5000}
+      - MAX_HOPS=${MAX_HOPS:-8}
     depends_on:
-      - juice-shop
+      target:
+        condition: service_started

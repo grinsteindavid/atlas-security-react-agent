@@ -70,24 +70,78 @@ Lean MVP to learn attacker thinking with a deterministic ReAct loop over OWASP J
 - Redact large bodies; cap captured bytes (e.g., 2 KB).
 - Deterministic tools only; no generated payloads.
 
-## Local dev (Docker-first)
-Use a simple `docker-compose.yml`:
-- `juice-shop`: exposed on `3000`.
-- `atlas-agent`: Node 18+, depends_on juice-shop, connects to `http://juice-shop:3000`.
+## Quick Start
 
-Env (.env):
-```
-TARGET_URL=http://juice-shop:3000
-OPENAI_API_KEY=...
-MAX_REQ_PER_RUN=80
-REQ_TIMEOUT_MS=5000
-```
+### Prerequisites
+- Node.js 18+
+- Docker & Docker Compose
+- OpenAI API key
 
-Commands (after packages are added):
-```
-docker compose up --build
-docker compose run atlas-agent pnpm dev   # or npm run dev
-```
+### Option 1: Docker (Recommended)
+
+1. **Clone and setup environment**
+   ```bash
+   git clone <repo-url>
+   cd atlas-security-react-agent
+   cp .env.example .env  # or create .env manually
+   ```
+
+2. **Configure `.env`**
+   ```
+   TARGET_URL=http://juice-shop:3000
+   OPENAI_API_KEY=sk-your-key-here
+   MAX_REQ_PER_RUN=80
+   MAX_HOPS=40
+   REQ_TIMEOUT_MS=5000
+   WAIT_FOR_TARGET_MS=30000
+   ```
+
+3. **Run with Docker Compose**
+   ```bash
+   docker compose up --build
+   ```
+   This starts both Juice Shop (target) and the ATLAS agent.
+
+4. **View results**
+   ```bash
+   ls traces/
+   cat traces/trace-*.json | jq .
+   ```
+
+### Option 2: Local Development
+
+1. **Install dependencies**
+   ```bash
+   npm install
+   ```
+
+2. **Start Juice Shop separately** (in another terminal)
+   ```bash
+   docker run -d -p 3000:3000 bkimminich/juice-shop
+   ```
+
+3. **Configure `.env` for local**
+   ```
+   TARGET_URL=http://localhost:3000
+   OPENAI_API_KEY=sk-your-key-here
+   ```
+
+4. **Run the agent**
+   ```bash
+   npm run dev
+   ```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TARGET_URL` | `http://juice-shop:3000` | Target web application URL |
+| `OPENAI_API_KEY` | — | Required for LLM reasoning |
+| `MAX_REQ_PER_RUN` | `80` | Max HTTP requests per run |
+| `MAX_HOPS` | `8` | Max reasoning iterations |
+| `REQ_TIMEOUT_MS` | `5000` | Per-request timeout |
+| `WAIT_FOR_TARGET_MS` | `0` | Wait for target availability |
+| `MAX_HITS_PER_PATH` | `2` | Max hits per unique path |
 
 ## MVP flow (attacker-first steps)
 1) Recon GETs: `/`, robots, assets → note titles/forms/scripts/headers.  
