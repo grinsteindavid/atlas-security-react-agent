@@ -1,7 +1,34 @@
 /**
- * Create the initial agent state for a single run.
+ * Seed paths for reconnaissance - common API and sensitive endpoints.
  */
-const SEED_CANDIDATES = [];
+const SEED_CANDIDATES = [
+  "/api/Users",
+  "/api/Products",
+  "/api/Feedbacks",
+  "/api/Challenges",
+  "/api/Complaints",
+  "/api/Recycles",
+  "/api/SecurityQuestions",
+  "/api/Quantitys",
+  "/rest/user/login",
+  "/rest/user/whoami",
+  "/rest/basket",
+  "/rest/captcha",
+  "/rest/admin/application-configuration",
+  "/rest/languages",
+  "/rest/products/search",
+  "/#/login",
+  "/#/register",
+  "/#/basket",
+  "/#/search",
+  "/#/administration",
+  "/ftp",
+  "/encryptionkeys",
+  "/support/logs",
+  "/metrics",
+  "/swagger.json",
+  "/api-docs",
+];
 
 function createInitialState() {
   return {

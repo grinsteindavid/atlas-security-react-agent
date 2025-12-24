@@ -188,6 +188,7 @@ async function writeTrace(state, path) {
     hops: state.hops,
     stopReason: state.stopReason,
     visitedPaths: state.visitedPaths,
+    candidates: state.candidates ?? [],
     requestBudget: {
       used: state.metrics?.requests ?? 0,
       max: Number.parseInt(process.env.MAX_REQ_PER_RUN ?? "80", 10),

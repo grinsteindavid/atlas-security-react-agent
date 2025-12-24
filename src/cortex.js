@@ -36,7 +36,9 @@ const CortexResponseSchema = z.object({
   next_actions: z.array(ActionSchema).max(MAX_ACTIONS_PER_DECISION).optional().default([]),
   thought: z.string(),
   hypothesis: z.string(),
-  owasp_category: z.string(),
+  owasp_category: z.union([z.string(), z.array(z.string())]).transform((val) =>
+    Array.isArray(val) ? val[0] ?? "A05:2021-Security Misconfiguration" : val
+  ),
   confidence_0_1: z.number().min(0).max(1),
   observation_ref: z.union([z.string(), z.null()]).optional().default(null),
 });
@@ -50,32 +52,28 @@ function buildSystemPrompt() {
     (t) => `- ${t.name}: ${t.description}`
   ).join("\n");
 
-  return `You are a security reconnaissance agent analyzing a web application.
+  return `You are a security reconnaissance agent. Respond with raw JSON only.
 
-RESPONSE FORMAT: Raw JSON object (no markdown, no code fences).
+REQUIRED JSON FIELDS:
+- decision: "probe" or "report"
+- next_actions: [{tool, args: {path}, rationale}] (1-5 actions)
+- thought, hypothesis, owasp_category, confidence_0_1, observation_ref
 
-REQUIRED FIELDS:
-- decision: "probe" (continue testing) or "report" (finish)
-- next_actions: array of actions when decision is "probe"
-- thought: your reasoning process
-- hypothesis: what vulnerability you suspect
-- owasp_category: e.g. "A01:2021-Broken Access Control"
-- confidence_0_1: 0.0-1.0 confidence level
-- observation_ref: ID from observations or null
-
-ACTION FORMAT: {"tool": "tool_name", "args": {"path": "/endpoint"}, "rationale": "why"}
-
-AVAILABLE TOOLS:
+TOOLS:
 ${toolsText}
 
-STRATEGY:
-- Check candidateScores for high-priority unvisited paths
-- Prioritize API endpoints (/api/*, /rest/*) and auth paths
-- Skip paths already in currentFindings
-- Avoid paths in recentErrors
-- Vary tools: GET → inspect_headers → provoke_error
+CRITICAL RULES:
+1. ALWAYS pick paths from candidateScores (highest scores first) - these are discovered links
+2. NEVER repeat visitedPaths - pick NEW paths only
+3. Use DIFFERENT tools each hop: http_get → provoke_error → inspect_headers → captcha_fetch
+4. If you see /rest/captcha in candidates, use captcha_fetch to check for answer leakage
+5. Try http_post on /api/* endpoints to test input handling
+6. Use provoke_error on API endpoints to surface stack traces
 
-CONFIDENCE: 0.1-0.3 speculation | 0.4-0.6 indirect evidence | 0.7-0.9 confirmed`;
+STOP CONDITIONS (set decision: "report"):
+- remainingBudget < 5
+- remainingHops < 2
+- No new candidates to explore`;
 }
 
 /**
@@ -160,10 +158,11 @@ async function runCortex(state) {
     {
       role: "user",
       content: JSON.stringify({
-        observations: state.observations.slice(-8),
+        observations: state.observations.slice(-5),
         remainingBudget,
         remainingHops,
-        candidateScores: candidateScores.slice(0, 10),
+        visitedPaths: state.visitedPaths ?? [],
+        candidateScores: candidateScores.slice(0, 15),
         currentFindings,
         sessionState,
         recentErrors,

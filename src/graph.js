@@ -480,7 +480,7 @@ async function runOnce() {
   initialState.consecutiveSkips = 0;
 
   const app = buildGraph();
-  await app.invoke(initialState);
+  await app.invoke(initialState, { recursionLimit: 100 });
 }
 
 export {
