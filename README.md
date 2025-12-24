@@ -1,179 +1,251 @@
 # ATLAS (Adversarial Thought & Logic Analysis System)
 
-Lean MVP to learn attacker thinking with a deterministic ReAct loop over OWASP Juice Shop (or a mock target). Built with LangGraphJS + OpenAI.
+A security reconnaissance agent that **learns attacker thinking** through hypothesis-driven exploration. Built with LangGraph StateGraph + OpenAI, targeting OWASP Juice Shop as a practice environment.
 
-## Vision
-- Simulate attacker cognition (Reason → Act → Observe).
-- Prioritize hypothesis generation and evidence over exploit delivery.
-- Produce a clear cognition trace for review and learning.
+## Project Intent
 
-## Architecture (ReAct, LangGraph StateGraph)
-- **Nodes**:
-  - Cortex (LLM reasoning, GPT-4o-mini, temp 0).
-  - Senses (deterministic tools; no LLM-generated payloads).
-  - Reporter (final trace).
-- **State**:
-  - `observations[]`: raw HTTP responses/headers (truncated, redacted if needed).
-  - `reasoningLog[]`: `{thought, hypothesis, owasp_category, confidence_0_1, observation_ref, timestamp}`.
-  - `decision`: `probe` or `report`.
+ATLAS is an **educational tool** designed to:
 
-## Tools (deterministic)
-1. `httpGet` — crawl breadth-first (depth/host capped), capture headers/body snippet, cookie jar.
-2. `httpPost` — json/form with cookie jar; mild schema deviations allowed.
-3. `inspectHeaders` — CSP, HSTS, CORS, cache headers.
-4. `provokeError` — malformed JSON to elicit verbose errors (non-exploit).
-5. `measureTiming` — control vs test payload timing deltas.
+1. **Learn attacker cognition** — Model the Hypothesize → Plan → Act → Evaluate cycle
+2. **Generate evidence, not exploits** — Observe and document, never attack
+3. **Produce learning artifacts** — Clear reasoning traces for review and study
 
-## Reasoning node (Cortex)
-- Input: latest observations.
-- Output: strict JSON with OWASP mapping; reject/retry if invalid JSON or missing category.
-- Guardrails: no exploit payload suggestions; must cite `observation_ref`; confidence 0–1.
+The agent forms security hypotheses, gathers evidence through safe reconnaissance, and outputs structured findings mapped to OWASP categories.
 
-## Reporter
-- Emits timestamped traces under `traces/trace-<runId>.json` (gitignored) with: run metadata (target, start/end), nodes visited, request budget used/max, observations, reasoning log, tool metrics, and LLM meta (attempts/fallback).
+---
 
-### Sample trace (excerpt)
-```json
-{
-  "run_id": "2025-12-23T15-35-30-289Z",
-  "target": "http://juice-shop:3000",
-  "observations": [
-    {
-      "tool": "httpGet",
-      "label": "adminPage",
-      "url": "http://juice-shop:3000/#/administration",
-      "status": 200,
-      "latencyMs": 7
-    },
-    {
-      "tool": "httpPost",
-      "label": "feedbackProbe",
-      "url": "http://juice-shop:3000/api/Feedbacks",
-      "status": 500,
-      "note": "json"
-    }
-  ],
-  "reasoningLog": [
-    {
-      "owasp_category": "A1: Injection",
-      "observation_ref": "httpPost-…",
-      "confidence_0_1": 0.8
-    }
-  ],
-  "metrics": { "requests": 6, "perTool": { "httpGet": 3, "httpPost": 1, "inspectHeaders": 1, "provokeError": 1 } },
-  "llmMeta": { "attempts": 2, "usedFallback": false }
-}
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    LangGraph StateGraph                  │
+│                                                         │
+│   ┌─────────┐     ┌─────────┐     ┌──────────┐        │
+│   │  Probe  │────▶│ Cortex  │────▶│ Reporter │        │
+│   │ (Tools) │◀────│  (LLM)  │     │ (Trace)  │        │
+│   └─────────┘     └─────────┘     └──────────┘        │
+│        │                │                              │
+│        ▼                ▼                              │
+│   Parallel HTTP    Hypothesis-First                    │
+│   Execution        Reasoning                           │
+└─────────────────────────────────────────────────────────┘
 ```
 
-## Safety & scope
-- Target allowlist (env), max requests per run, per-request timeout, crawl depth limit.
-- Redact large bodies; cap captured bytes (e.g., 2 KB).
-- Deterministic tools only; no generated payloads.
+### Nodes
+
+| Node | Purpose |
+|------|---------|
+| **Probe** | Executes 1-5 tools in parallel per hop |
+| **Cortex** | LLM reasoning (GPT-4o-mini, temp 0) with hypothesis-first prompting |
+| **Reporter** | Writes structured trace with findings and OWASP mappings |
+
+### Reasoning Cycle (ReAct)
+
+1. **Hypothesize** — What vulnerability might exist? Map to OWASP category
+2. **Plan** — Which tools would provide evidence for/against?
+3. **Act** — Execute tools (batch, parallel)
+4. **Evaluate** — Adjust confidence based on results
+
+### Confidence Calibration
+
+| Level | Range | Meaning |
+|-------|-------|---------|
+| Speculation | 0.1–0.3 | Pattern suggests possibility, no evidence |
+| Indirect | 0.4–0.6 | Circumstantial evidence (e.g., 401 response) |
+| Direct | 0.7–0.9 | Clear evidence (e.g., stack trace, data leak) |
+
+---
+
+## Tools (Deterministic)
+
+| Tool | Description |
+|------|-------------|
+| `http_get` | GET request with cookie jar, body snippet capture |
+| `http_post` | POST JSON with cookie jar |
+| `inspect_headers` | Audit CSP, HSTS, CORS, server headers |
+| `provoke_error` | Send malformed JSON to surface verbose errors |
+| `measure_timing` | Compare control vs test request timing |
+| `captcha_fetch` | Fetch CAPTCHA metadata for form testing |
+
+All tools are **deterministic** — no LLM-generated payloads.
+
+---
 
 ## Quick Start
 
 ### Prerequisites
-- Node.js 18+
+
 - Docker & Docker Compose
 - OpenAI API key
+- Node.js 20+ (for local development)
 
-### Option 1: Docker (Recommended)
+### Option 1: Docker Compose (Recommended)
 
-1. **Clone and setup environment**
-   ```bash
-   git clone <repo-url>
-   cd atlas-security-react-agent
-   cp .env.example .env  # or create .env manually
-   ```
+The `docker-compose.yml` defines two services:
 
-2. **Configure `.env`**
-   ```
-   TARGET_URL=http://juice-shop:3000
-   OPENAI_API_KEY=sk-your-key-here
-   MAX_REQ_PER_RUN=80
-   MAX_HOPS=40
-   REQ_TIMEOUT_MS=5000
-   WAIT_FOR_TARGET_MS=30000
-   ```
+| Service | Description | Runs By Default |
+|---------|-------------|-----------------|
+| `target` | OWASP Juice Shop on port 3000 | ✅ Yes |
+| `atlas-agent` | The ATLAS agent | ❌ No (profile required) |
 
-3. **Run with Docker Compose**
-   ```bash
-   docker compose up --build
-   ```
-   This starts both Juice Shop (target) and the ATLAS agent.
+#### Step 1: Start Juice Shop
 
-4. **View results**
-   ```bash
-   ls traces/
-   cat traces/trace-*.json | jq .
-   ```
+```bash
+# Start only the target (Juice Shop)
+docker compose up -d
+```
+
+Juice Shop will be available at `http://localhost:3000`.
+
+#### Step 2: Create `.env` file
+
+```bash
+# Required
+OPENAI_API_KEY=sk-your-key-here
+
+# Optional (defaults shown)
+TARGET_URL=http://target:3000
+MAX_REQ_PER_RUN=80
+MAX_HOPS=40
+REQ_TIMEOUT_MS=5000
+```
+
+#### Step 3: Run the Agent
+
+```bash
+# Run agent alongside target
+docker compose --profile agent up atlas-agent
+```
+
+Or run both together:
+
+```bash
+docker compose --profile agent up
+```
+
+#### Step 4: View Results
+
+```bash
+ls traces/
+cat traces/trace-*.json | jq .
+```
 
 ### Option 2: Local Development
 
-1. **Install dependencies**
-   ```bash
-   npm install
-   ```
+```bash
+# 1. Start Juice Shop
+docker compose up -d
 
-2. **Start Juice Shop separately** (in another terminal)
-   ```bash
-   docker run -d -p 3000:3000 bkimminich/juice-shop
-   ```
+# 2. Install dependencies
+npm install
 
-3. **Configure `.env` for local**
-   ```
-   TARGET_URL=http://localhost:3000
-   OPENAI_API_KEY=sk-your-key-here
-   ```
+# 3. Configure .env for local
+echo "TARGET_URL=http://localhost:3000" >> .env
+echo "OPENAI_API_KEY=sk-your-key" >> .env
 
-4. **Run the agent**
-   ```bash
-   npm run dev
-   ```
+# 4. Run the agent
+npm run dev
 
-### Environment Variables
+# 5. Run tests
+npm test
+```
+
+---
+
+## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TARGET_URL` | `http://juice-shop:3000` | Target web application URL |
-| `OPENAI_API_KEY` | — | Required for LLM reasoning |
-| `MAX_REQ_PER_RUN` | `80` | Max HTTP requests per run |
-| `MAX_HOPS` | `8` | Max reasoning iterations |
-| `REQ_TIMEOUT_MS` | `5000` | Per-request timeout |
-| `WAIT_FOR_TARGET_MS` | `0` | Wait for target availability |
-| `MAX_HITS_PER_PATH` | `2` | Max hits per unique path |
+| `OPENAI_API_KEY` | — | **Required** for LLM reasoning |
+| `TARGET_URL` | `http://target:3000` | Target URL (use `target` in Docker, `localhost` locally) |
+| `MAX_REQ_PER_RUN` | `80` | HTTP request budget per run |
+| `MAX_HOPS` | `40` | Max reasoning iterations |
+| `REQ_TIMEOUT_MS` | `5000` | Per-request timeout (ms) |
+| `MAX_HITS_PER_PATH` | `2` | Max requests to same path |
+| `WAIT_FOR_TARGET_MS` | `0` | Wait for target availability at startup |
+| `JUICE_SHOP_PORT` | `3000` | Host port for Juice Shop |
 
-## MVP flow (attacker-first steps)
-1) Recon GETs: `/`, robots, assets → note titles/forms/scripts/headers.  
-2) Session surface: observe Set-Cookie flags; reuse cookies.  
-3) Auth probing: POST benign creds; compare timing vs malformed.  
-4) Reflection/error pokes: harmless noisy params + malformed JSON.  
-5) Header audit: CSP/HSTS/CORS/cache.  
-6) Unauth access checks: obvious protected routes/APIs.  
-7) Light state-change pokes: near-valid bodies to test validation.  
-8) Timing control/test pairs.
+---
 
-## Expected Juice Shop signals (easy wins)
-- Missing/weak HSTS & CSP.
-- Verbose error responses on malformed JSON.
-- Reflected input in pages or API error bodies.
-- Unauth access to some API routes/assets.
-- Timing variance on auth endpoints (possible user-enum hint).
+## Output: Reasoning Trace
 
-## Coding roadmap
-1. Init Node project; add `@langchain/langgraph`, `@langchain/openai`, `axios`, `tough-cookie`.  
-2. Implement tools with cookie jar, timeout, rate limit, and depth caps.  
-3. Build cortex prompt + JSON schema validation + retry on invalid output.  
-4. Wire StateGraph: start → probe (tools) → cortex → decision (probe/report) → reporter.  
-5. Add mock mode (recorded fixtures) for deterministic runs; default to Juice Shop for manual.  
-6. Run and review `reasoning_trace.json`; iterate on prompt and tool coverage.
+Each run produces `traces/trace-<timestamp>.json`:
 
-## Code structure (JS + JSDoc)
-- `src/config.js` — env/limits constants.  
-- `src/state.js` — state helpers for observations/logs.  
-- `src/httpClient.js` — axios client with cookie jar, body snippet helper.  
-- `src/tools.js` — deterministic tools (GET/POST/header audit/error provoke/timing), budget guard.  
-- `src/cortex.js` — reasoning node (OpenAI when key present, stub fallback).  
-- `src/reporter.js` — write `reasoning_trace.json`.  
-- `src/graph.js` — StateGraph wiring nodes.  
-- `src/index.js` — entrypoint to run once.
+```json
+{
+  "run_id": "2025-12-24T08-00-00-000Z",
+  "target": "http://target:3000",
+  "summary": {
+    "findingsCount": 5,
+    "owaspCategories": [
+      { "category": "A05:2021-Security Misconfiguration", "count": 3 }
+    ],
+    "toolUsage": { "http_get": 12, "inspect_headers": 4, "provoke_error": 3 },
+    "batchStats": { "totalBatches": 8, "totalActions": 24 }
+  },
+  "findings": [
+    {
+      "type": "security_misconfiguration",
+      "subtype": "missing_csp",
+      "severity": "low",
+      "evidence": "No Content-Security-Policy header",
+      "owasp": "A05:2021-Security Misconfiguration"
+    }
+  ],
+  "reasoningLog": [
+    {
+      "thought": "The API returns JSON without auth headers...",
+      "hypothesis": "API endpoints may lack authentication",
+      "owasp_category": "A01:2021-Broken Access Control",
+      "confidence_0_1": 0.6
+    }
+  ]
+}
+```
+
+---
+
+## Safety & Scope
+
+- **Target allowlist** — Only connects to configured `TARGET_URL`
+- **Request budget** — Capped at `MAX_REQ_PER_RUN` (default 80)
+- **Timeout** — Per-request timeout prevents hanging
+- **Body redaction** — Response bodies capped at 2KB
+- **No exploits** — Tools are observational only
+
+---
+
+## Code Structure
+
+```
+src/
+├── index.js        # Entrypoint
+├── config.js       # Environment & limits
+├── constants.js    # Tool lists, patterns, confidence levels
+├── state.js        # Initial state factory
+├── graph.js        # LangGraph StateGraph (probe → cortex → report)
+├── cortex.js       # LLM reasoning with hypothesis-first prompt
+├── tools.js        # Deterministic HTTP tools
+├── httpClient.js   # Axios client with cookie jar
+├── pathUtils.js    # Path scoring & classification
+└── reporter.js     # Trace writer with findings extraction
+```
+
+---
+
+## Expected Findings (Juice Shop)
+
+The agent typically detects:
+
+- ❌ Missing HSTS header
+- ❌ Missing Content-Security-Policy
+- ❌ CORS wildcard (`Access-Control-Allow-Origin: *`)
+- ❌ Server/version disclosure
+- ❌ Verbose error responses (stack traces)
+- ❌ Unprotected API endpoints
+
+---
+
+## License
+
+MIT
