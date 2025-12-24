@@ -3,6 +3,11 @@ import { addObservation } from "./state.js";
 import { TARGET_URL, MAX_REQ_PER_RUN } from "./config.js";
 import { isStaticPath } from "./pathUtils.js";
 
+/**
+ * Add a path to the candidate queue if not already visited/queued.
+ * @param {object} state
+ * @param {string} path
+ */
 function addCandidate(state, path) {
   if (!path || typeof path !== "string") return;
   if (state.visitedPaths.includes(path)) return;
@@ -10,6 +15,11 @@ function addCandidate(state, path) {
   state.candidates.push(path);
 }
 
+/**
+ * Extract URL paths from HTML/JS content.
+ * @param {string} content
+ * @returns {string[]}
+ */
 function extractPathsFromContent(content) {
   if (typeof content !== "string") return [];
   const found = [];
@@ -48,6 +58,12 @@ function extractPathsFromContent(content) {
   return found;
 }
 
+/**
+ * Parse content and add discovered paths to candidates.
+ * @param {object} state
+ * @param {string} baseUrl
+ * @param {string} content
+ */
 function addCandidatesFromContent(state, baseUrl, content) {
   const found = extractPathsFromContent(content);
   

@@ -1,5 +1,10 @@
 import fs from "fs/promises";
 
+/**
+ * Extract security findings from observations.
+ * @param {object} state
+ * @returns {object[]} Array of finding objects
+ */
 function extractFindings(state) {
   const findings = [];
   const seen = new Set();
@@ -115,6 +120,11 @@ function extractFindings(state) {
   return findings;
 }
 
+/**
+ * Summarize OWASP category counts from reasoning log.
+ * @param {object[]} reasoningLog
+ * @returns {{category: string, count: number}[]}
+ */
 function summarizeOwaspCategories(reasoningLog) {
   const counts = {};
   for (const entry of reasoningLog ?? []) {

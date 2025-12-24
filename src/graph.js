@@ -15,6 +15,11 @@ import { updatePathStats } from "./state.js";
 import { isStaticPath, isApiOrAuthPath } from "./pathUtils.js";
 import { DIVERSITY_INTERVAL, REQUIRED_DIVERSITY_TOOLS } from "./constants.js";
 
+/**
+ * Mark a path as visited in state.
+ * @param {object} state
+ * @param {string} path
+ */
 function markVisited(state, path) {
   if (!path) return;
   if (!state.visitedPaths.includes(path)) {
@@ -22,17 +27,34 @@ function markVisited(state, path) {
   }
 }
 
+/**
+ * Increment hit count for a path.
+ * @param {object} state
+ * @param {string} path
+ */
 function recordHit(state, path) {
   if (!path) return;
   state.pathHits[path] = (state.pathHits[path] ?? 0) + 1;
 }
 
+/**
+ * Check if a path can be hit again within limits.
+ * @param {object} state
+ * @param {string} path
+ * @returns {boolean}
+ */
 function canHit(state, path) {
   if (!path) return false;
   const hits = state.pathHits[path] ?? 0;
   return hits < MAX_HITS_PER_PATH;
 }
 
+/**
+ * Pop a valid candidate path from the queue.
+ * @param {object} state
+ * @param {boolean} [preferApi=false] - Prioritize API/auth paths
+ * @returns {string|null}
+ */
 function consumeCandidate(state, preferApi = false) {
   if (preferApi) {
     // First pass: look for API/auth paths only
@@ -56,6 +78,13 @@ function consumeCandidate(state, preferApi = false) {
   return null;
 }
 
+/**
+ * Select the best path for a tool invocation.
+ * @param {object} state
+ * @param {string} toolName
+ * @param {string} desiredPath - LLM-suggested path
+ * @returns {string|null}
+ */
 function choosePath(state, toolName, desiredPath) {
   // 1. Try LLM's desired path if valid
   if (desiredPath) {
@@ -76,6 +105,13 @@ function choosePath(state, toolName, desiredPath) {
   return null;
 }
 
+/**
+ * Dispatch a tool by name with arguments.
+ * @param {object} state
+ * @param {string} toolName
+ * @param {object} [args={}]
+ * @returns {Promise<boolean>} Success indicator
+ */
 async function dispatchTool(state, toolName, args = {}) {
   try {
     switch (toolName) {
@@ -197,6 +233,11 @@ async function dispatchTool(state, toolName, args = {}) {
   }
 }
 
+/**
+ * Determine if tool diversity requires forcing a specific tool.
+ * @param {object} state
+ * @returns {string|null} Tool name to force, or null
+ */
 function shouldForceTool(state) {
   if (state.hops < DIVERSITY_INTERVAL) return null;
   for (const tool of REQUIRED_DIVERSITY_TOOLS) {
@@ -215,6 +256,11 @@ function shouldForceTool(state) {
   return null;
 }
 
+/**
+ * Increment usage counter for a tool.
+ * @param {object} state
+ * @param {string} toolName
+ */
 function trackToolUsage(state, toolName) {
   if (state.toolUsage && toolName in state.toolUsage) {
     state.toolUsage[toolName] += 1;

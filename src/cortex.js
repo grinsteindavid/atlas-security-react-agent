@@ -4,6 +4,9 @@ import { MAX_REQ_PER_RUN, MAX_HOPS, MAX_HITS_PER_PATH } from "./config.js";
 import { ALLOWED_TOOLS } from "./constants.js";
 import { scorePath } from "./pathUtils.js";
 
+/**
+ * Zod schema for validating Cortex LLM responses.
+ */
 const CortexResponseSchema = z.object({
   decision: z.enum(["probe", "report"]),
   next_tool: z.enum(ALLOWED_TOOLS).optional(),
@@ -23,6 +26,12 @@ const CortexResponseSchema = z.object({
   observation_ref: z.string().nullable(),
 });
 
+/**
+ * Validate raw LLM output against the Cortex schema.
+ * @param {unknown} data - Parsed JSON from LLM
+ * @returns {object} Validated response
+ * @throws {Error} If validation fails
+ */
 function validateCortexResponse(data) {
   const result = CortexResponseSchema.safeParse(data);
   if (!result.success) {

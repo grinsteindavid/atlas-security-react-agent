@@ -1,3 +1,7 @@
+/**
+ * File extensions considered static assets (skipped for deep probing).
+ * @type {string[]}
+ */
 export const STATIC_EXTENSIONS = [
   ".css",
   ".js",
@@ -15,6 +19,10 @@ export const STATIC_EXTENSIONS = [
   ".eot",
 ];
 
+/**
+ * Tools the Cortex may invoke.
+ * @type {string[]}
+ */
 export const ALLOWED_TOOLS = [
   "http_get",
   "http_post",
@@ -24,18 +32,38 @@ export const ALLOWED_TOOLS = [
   "captcha_fetch",
 ];
 
+/**
+ * Regex patterns matching API-like paths.
+ * @type {RegExp[]}
+ */
 export const API_PATH_PATTERNS = [
   /^\/(api|rest|v[0-9]+|graphql)/i,
 ];
 
+/**
+ * Regex patterns matching authentication-related paths.
+ * @type {RegExp[]}
+ */
 export const AUTH_PATH_PATTERNS = [
   /(login|auth|admin|signin|account|user|profile|register|password|token|session)/i,
 ];
 
+/**
+ * Regex patterns matching sensitive or config paths.
+ * @type {RegExp[]}
+ */
 export const SENSITIVE_PATH_PATTERNS = [
   /(swagger|openapi|config|debug|backup|ftp|\.git|\.env|docs)/i,
 ];
 
+/**
+ * Number of hops between forced tool diversity checks.
+ * @type {number}
+ */
 export const DIVERSITY_INTERVAL = 5;
 
+/**
+ * Tools that must be used periodically for coverage.
+ * @type {string[]}
+ */
 export const REQUIRED_DIVERSITY_TOOLS = ["inspect_headers", "provoke_error"];
