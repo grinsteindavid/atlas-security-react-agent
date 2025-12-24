@@ -1,6 +1,8 @@
 import { shouldForceTool, decisionRouter } from "../src/graph.js";
 import { isApiOrAuthPath } from "../src/pathUtils.js";
 import { MAX_REQ_PER_RUN, MAX_HOPS } from "../src/config.js";
+import { createInitialState } from "../src/state.js";
+import { CONFIDENCE_LEVELS, MAX_ACTIONS_PER_DECISION } from "../src/constants.js";
 
 describe("isApiOrAuthPath", () => {
   test("returns true for API paths", () => {
@@ -156,5 +158,41 @@ describe("decisionRouter", () => {
       decision: "probe",
     });
     expect(decisionRouter(state)).toBe("probe");
+  });
+});
+
+describe("batch execution state", () => {
+  test("nextActions array is initialized empty", () => {
+    const state = createInitialState();
+    expect(state.nextActions).toEqual([]);
+  });
+
+  test("batchStats is initialized with zeros", () => {
+    const state = createInitialState();
+    expect(state.batchStats).toEqual({
+      totalBatches: 0,
+      totalActions: 0,
+    });
+  });
+});
+
+describe("confidence calibration constants", () => {
+  test("CONFIDENCE_LEVELS has correct structure", () => {
+    expect(CONFIDENCE_LEVELS.SPECULATION).toHaveProperty("min");
+    expect(CONFIDENCE_LEVELS.SPECULATION).toHaveProperty("max");
+    expect(CONFIDENCE_LEVELS.SPECULATION).toHaveProperty("desc");
+    expect(CONFIDENCE_LEVELS.INDIRECT).toBeDefined();
+    expect(CONFIDENCE_LEVELS.DIRECT).toBeDefined();
+  });
+
+  test("confidence ranges are valid", () => {
+    expect(CONFIDENCE_LEVELS.SPECULATION.min).toBeLessThan(CONFIDENCE_LEVELS.SPECULATION.max);
+    expect(CONFIDENCE_LEVELS.INDIRECT.min).toBeLessThan(CONFIDENCE_LEVELS.INDIRECT.max);
+    expect(CONFIDENCE_LEVELS.DIRECT.min).toBeLessThan(CONFIDENCE_LEVELS.DIRECT.max);
+  });
+
+  test("MAX_ACTIONS_PER_DECISION is defined", () => {
+    expect(MAX_ACTIONS_PER_DECISION).toBeGreaterThan(0);
+    expect(MAX_ACTIONS_PER_DECISION).toBeLessThanOrEqual(10);
   });
 });

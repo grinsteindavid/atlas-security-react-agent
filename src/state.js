@@ -35,6 +35,12 @@ function createInitialState() {
     captchaUsed: false,
     pathStats: {},
     skippedHops: 0,
+    // Batch execution support
+    nextActions: [],
+    batchStats: {
+      totalBatches: 0,
+      totalActions: 0,
+    },
   };
 }
 

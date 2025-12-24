@@ -268,32 +268,90 @@ function trackToolUsage(state, toolName) {
 }
 
 /**
- * Probe node: executes the selected tool.
+ * Execute multiple tools in parallel.
+ * @param {object} state
+ * @param {Array<{tool: string, args: object, rationale: string}>} actions
+ * @returns {Promise<{successes: number, failures: number}>}
+ */
+async function dispatchToolsBatch(state, actions) {
+  if (!actions || actions.length === 0) {
+    return { successes: 0, failures: 0 };
+  }
+
+  // Prepare all dispatch promises
+  const dispatches = actions.map(({ tool, args }) => {
+    return dispatchTool(state, tool, args)
+      .then((success) => ({ tool, success }))
+      .catch(() => ({ tool, success: false }));
+  });
+
+  // Execute in parallel
+  const results = await Promise.all(dispatches);
+
+  let successes = 0;
+  let failures = 0;
+  for (const { tool, success } of results) {
+    if (success) {
+      trackToolUsage(state, tool);
+      successes += 1;
+    } else {
+      failures += 1;
+    }
+  }
+
+  return { successes, failures };
+}
+
+/**
+ * Probe node: executes selected tools (batch or single).
  */
 async function probeNode(state) {
-  const toolName = state.nextTool ?? "http_get";
-  const args = state.nextArgs ?? { path: "/", label: "seed" };
+  const actions = state.nextActions ?? [];
 
-  const success = await dispatchTool(state, toolName, args);
-  if (success) {
-    trackToolUsage(state, toolName);
+  // Fallback to legacy single action
+  if (actions.length === 0) {
+    const toolName = state.nextTool ?? "http_get";
+    const args = state.nextArgs ?? { path: "/", label: "seed" };
+    const success = await dispatchTool(state, toolName, args);
+    if (success) {
+      trackToolUsage(state, toolName);
+      state.consecutiveSkips = 0;
+    } else {
+      state.skippedHops = (state.skippedHops ?? 0) + 1;
+      state.consecutiveSkips = (state.consecutiveSkips ?? 0) + 1;
+    }
+    state.hops += 1;
+    return state;
+  }
+
+  // Batch execution
+  console.log(`[probe] executing ${actions.length} actions in parallel`);
+  const { successes, failures } = await dispatchToolsBatch(state, actions);
+
+  if (successes > 0) {
     state.consecutiveSkips = 0;
   } else {
     state.skippedHops = (state.skippedHops ?? 0) + 1;
     state.consecutiveSkips = (state.consecutiveSkips ?? 0) + 1;
   }
-  state.hops += 1;
 
+  state.hops += 1;
+  state.batchStats = state.batchStats ?? { totalBatches: 0, totalActions: 0 };
+  state.batchStats.totalBatches += 1;
+  state.batchStats.totalActions += actions.length;
+
+  console.log(`[probe] batch complete: ${successes} succeeded, ${failures} failed`);
   return state;
 }
 
 /**
- * Cortex node: LLM reasoning to decide next action.
+ * Cortex node: LLM reasoning to decide next action(s).
  */
 async function cortexNode(state) {
   const cortexRes = await runCortex(state);
+  const actionCount = cortexRes.next_actions?.length ?? 0;
   console.log(
-    `[cortex] decision=${cortexRes.decision} next_tool=${cortexRes.next_tool ?? "none"} hops=${
+    `[cortex] decision=${cortexRes.decision} actions=${actionCount} hops=${
       state.hops
     } requests=${state.metrics?.requests ?? 0}`
   );
@@ -304,8 +362,9 @@ async function cortexNode(state) {
   state.decisions.push({
     hop: state.hops,
     decision: cortexRes.decision,
-    next_tool: cortexRes.next_tool ?? null,
-    path: cortexRes.next_args?.path ?? null,
+    actions: cortexRes.next_actions?.map((a) => ({ tool: a.tool, path: a.args?.path })) ?? [],
+    thought: cortexRes.log.thought,
+    hypothesis: cortexRes.log.hypothesis,
     timestamp: new Date().toISOString(),
   });
 
@@ -313,9 +372,11 @@ async function cortexNode(state) {
   const forcedTool = shouldForceTool(state);
   if (forcedTool) {
     console.log(`[diversity] forcing ${forcedTool} (usage: ${state.toolUsage[forcedTool] ?? 0})`);
+    state.nextActions = [{ tool: forcedTool, args: { path: "/" }, rationale: "diversity enforcement" }];
     state.nextTool = forcedTool;
     state.nextArgs = { path: "/", label: `forced-${forcedTool}` };
   } else {
+    state.nextActions = cortexRes.next_actions ?? [];
     state.nextTool = cortexRes.next_tool ?? "http_get";
     state.nextArgs = cortexRes.next_args ?? { path: "/" };
   }
@@ -388,6 +449,8 @@ function buildGraph() {
       consecutiveSkips: { value: (a, b) => b ?? a },
       nextTool: { value: (a, b) => b ?? a },
       nextArgs: { value: (a, b) => b ?? a },
+      nextActions: { value: (a, b) => b ?? a },
+      batchStats: { value: (a, b) => b ?? a },
     },
   });
 
@@ -413,6 +476,7 @@ async function runOnce() {
   const initialState = createInitialState();
   initialState.nextTool = "http_get";
   initialState.nextArgs = { path: "/", label: "seed" };
+  initialState.nextActions = [];
   initialState.consecutiveSkips = 0;
 
   const app = buildGraph();

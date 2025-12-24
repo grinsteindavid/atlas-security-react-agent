@@ -1,14 +1,31 @@
 import { z } from "zod";
 import { ChatOpenAI } from "@langchain/openai";
 import { MAX_REQ_PER_RUN, MAX_HOPS, MAX_HITS_PER_PATH } from "./config.js";
-import { ALLOWED_TOOLS } from "./constants.js";
+import { ALLOWED_TOOLS, MAX_ACTIONS_PER_DECISION } from "./constants.js";
 import { scorePath } from "./pathUtils.js";
 
 /**
+ * Schema for a single action in batch execution.
+ */
+const ActionSchema = z.object({
+  tool: z.enum(ALLOWED_TOOLS),
+  args: z.object({
+    path: z.string(),
+    label: z.string().optional(),
+    body: z.record(z.unknown()).optional(),
+    control: z.record(z.unknown()).optional(),
+    test: z.record(z.unknown()).optional(),
+  }),
+  rationale: z.string(),
+});
+
+/**
  * Zod schema for validating Cortex LLM responses.
+ * Supports both legacy single-action and new batch actions.
  */
 const CortexResponseSchema = z.object({
   decision: z.enum(["probe", "report"]),
+  // Legacy single action (backward compat)
   next_tool: z.enum(ALLOWED_TOOLS).optional(),
   next_args: z
     .object({
@@ -19,6 +36,8 @@ const CortexResponseSchema = z.object({
       test: z.record(z.unknown()).optional(),
     })
     .optional(),
+  // New batch actions
+  next_actions: z.array(ActionSchema).max(MAX_ACTIONS_PER_DECISION).optional(),
   thought: z.string(),
   hypothesis: z.string(),
   owasp_category: z.string(),
@@ -111,45 +130,40 @@ async function runCortex(state) {
     {
       role: "system",
       content:
-        "You are the Cortex of an attacker-simulation agent targeting a web application.\n" +
-        "Respond with RAW JSON only (no code fences, no prose).\n" +
-        "Schema: {decision, next_tool?, next_args?, thought, hypothesis, owasp_category, confidence_0_1, observation_ref}.\n" +
-        "decision must be 'probe' or 'report'. If decision is 'probe', choose next_tool from allowlist and valid next_args.\n" +
-        "Allowlist tools: http_get {path,label?}, http_post {path,body,label?}, inspect_headers {path}, provoke_error {path}, measure_timing {path,control,test}, captcha_fetch {path}.\n\n" +
-        "STRATEGY:\n" +
-        "1. Start by exploring the seed response to discover the application structure (SPA routes, API endpoints, JS files).\n" +
-        "2. Prioritize API endpoints (/api/*, /rest/*, /v1/*, /graphql) - they expose data and auth flaws.\n" +
-        "3. Use candidateScores to pick high-score unvisited paths. NEVER repeat a path you already visited.\n" +
-        "4. After GET on an API endpoint returning JSON, try POST with empty body {} or provoke_error to surface stack traces.\n" +
-        "5. Look for auth endpoints (login, register, password, token, session, oauth) and test them.\n" +
-        "6. Use inspect_headers to check security headers, CORS policy, server info disclosure.\n" +
-        "7. Use diverse tools - don't just do http_get repeatedly. Vary: GET → inspect_headers → provoke_error → POST.\n" +
-        "8. If you see 401/403, note it as potential auth bypass target. If 500 with stack trace, note information disclosure.\n" +
-        "9. Look for sensitive paths: /admin, /debug, /config, /backup, /ftp, /.git, /swagger, /graphql.\n\n" +
-        "Cite an observation_ref from the inputs. No exploit payloads. Respect remaining budget and hops.",
+        "You are the Cortex of a security reconnaissance agent. Your goal is to LEARN attacker thinking by forming hypotheses and gathering evidence.\n\n" +
+        "OUTPUT: RAW JSON only (no code fences, no prose).\n" +
+        "SCHEMA: {decision, next_actions[], thought, hypothesis, owasp_category, confidence_0_1, observation_ref}\n\n" +
+        "REASONING CYCLE (ReAct):\n" +
+        "1. HYPOTHESIZE: Based on observations, what vulnerability might exist? Map to OWASP category.\n" +
+        "2. PLAN: Which tools would provide evidence for/against this hypothesis?\n" +
+        "3. ACT: Specify 1-5 actions in next_actions array to execute in parallel.\n" +
+        "4. EVALUATE: After results, adjust hypothesis confidence based on evidence.\n\n" +
+        "NEXT_ACTIONS FORMAT (array of 1-5 actions):\n" +
+        "[{tool, args: {path, label?, body?, control?, test?}, rationale}]\n" +
+        "Tools: http_get, http_post, inspect_headers, provoke_error, measure_timing, captcha_fetch\n\n" +
+        "CONFIDENCE CALIBRATION:\n" +
+        "- 0.1-0.3: Speculation (pattern suggests possibility, no evidence yet)\n" +
+        "- 0.4-0.6: Indirect evidence (e.g., 401 response hints at auth, but unconfirmed)\n" +
+        "- 0.7-0.9: Direct evidence (e.g., stack trace exposed, data leaked, header missing)\n\n" +
+        "PRIORITY TARGETS:\n" +
+        "- API endpoints: /api/*, /rest/*, /graphql (data exposure, auth flaws)\n" +
+        "- Auth flows: login, register, password reset, token endpoints\n" +
+        "- Sensitive paths: /admin, /swagger, /debug, /.git, /backup\n\n" +
+        "THOUGHT & HYPOTHESIS are the primary learning artifacts. Explain your reasoning clearly.\n" +
+        "Cite observation_ref from inputs. No exploit payloads. Respect budget.",
     },
     {
       role: "user",
       content: JSON.stringify({
-        observations: state.observations.slice(-5),
+        observations: state.observations.slice(-8),
         remainingBudget,
         remainingHops,
         visitedPaths: state.visitedPaths,
-        recentPaths: state.visitedPaths.slice(-3),
-        candidates: state.candidates.slice(0, 10),
+        candidates: state.candidates.slice(0, 15),
         candidateScores,
         lastDecisions,
         pathStatsSummary,
         captcha: state.captcha,
-        hints: [
-          "Pick paths from candidateScores with highest score (unvisited API/auth paths)",
-          "After http_get on API endpoint, follow up with provoke_error or http_post",
-          "Use inspect_headers on endpoints returning 401/403 to check auth mechanisms",
-          "Try http_post with {} body on API endpoints to test for missing auth",
-          "Fetch JavaScript files to discover more API endpoints",
-          "If you keep hitting same path, STOP and pick a different one from candidates",
-          "Look for patterns: /api/v1/*, /graphql, /swagger.json, /openapi.json",
-        ],
       }),
     },
   ];
@@ -196,10 +210,22 @@ async function runCortex(state) {
     };
   }
 
+  // Normalize to next_actions array (support legacy single action)
+  let nextActions = parsed.next_actions ?? [];
+  if (nextActions.length === 0 && parsed.next_tool) {
+    nextActions = [{
+      tool: parsed.next_tool,
+      args: parsed.next_args ?? { path: "/" },
+      rationale: "legacy single action",
+    }];
+  }
+
   return {
     decision: parsed.decision,
-    next_tool: parsed.next_tool ?? null,
-    next_args: parsed.next_args ?? {},
+    next_actions: nextActions,
+    // Legacy fields for backward compat
+    next_tool: parsed.next_tool ?? nextActions[0]?.tool ?? null,
+    next_args: parsed.next_args ?? nextActions[0]?.args ?? {},
     log: {
       thought: parsed.thought ?? "n/a",
       hypothesis: parsed.hypothesis ?? "n/a",

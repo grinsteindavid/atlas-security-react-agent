@@ -160,6 +160,7 @@ async function writeTrace(state, path) {
       owaspCategories: owaspSummary,
       toolUsage: state.toolUsage ?? {},
       skippedHops: state.skippedHops ?? 0,
+      batchStats: state.batchStats ?? { totalBatches: 0, totalActions: 0 },
     },
     findings,
     observations: state.observations,

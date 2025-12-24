@@ -67,3 +67,19 @@ export const DIVERSITY_INTERVAL = 5;
  * @type {string[]}
  */
 export const REQUIRED_DIVERSITY_TOOLS = ["inspect_headers", "provoke_error"];
+
+/**
+ * Confidence calibration guidelines for hypothesis scoring.
+ * @type {object}
+ */
+export const CONFIDENCE_LEVELS = {
+  SPECULATION: { min: 0.1, max: 0.3, desc: "Pattern-based guess, no direct evidence" },
+  INDIRECT: { min: 0.4, max: 0.6, desc: "Circumstantial evidence (e.g., 401 response)" },
+  DIRECT: { min: 0.7, max: 0.9, desc: "Clear evidence (e.g., stack trace, data leak)" },
+};
+
+/**
+ * Maximum actions per LLM decision for batch execution.
+ * @type {number}
+ */
+export const MAX_ACTIONS_PER_DECISION = 5;
