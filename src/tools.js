@@ -273,7 +273,7 @@ async function provokeError(state, path, label = "provokeError") {
 }
 
 /**
- * Fetch CAPTCHA metadata to obtain captchaId and image reference.
+ * Fetch CAPTCHA endpoint and check for answer leakage vulnerability.
  * @param {object} state
  * @param {string} path
  * @param {string} label
@@ -291,12 +291,22 @@ async function captchaFetch(state, path = "/rest/captcha", label = "captchaFetch
     throw err;
   }
   const data = resp?.data ?? {};
+
+  // Check for answer leakage (security vulnerability)
+  const hasAnswerLeak = data.answer !== undefined && data.answer !== null;
+
   state.captcha = {
     captchaId: data.captchaId ?? data.id ?? null,
     captcha: data.captcha ?? null,
-    answer: data.answer ?? null,
+    answer: hasAnswerLeak ? data.answer : null,
+    answerLeaked: hasAnswerLeak,
     fetchedAt: new Date().toISOString(),
   };
+
+  const note = hasAnswerLeak
+    ? "captcha answer leaked in response (vulnerability)"
+    : "captcha fetched, answer not exposed";
+
   return addObservation(
     state,
     toObservation(resp, {
@@ -305,7 +315,7 @@ async function captchaFetch(state, path = "/rest/captcha", label = "captchaFetch
       url,
       method: "GET",
       startedAt,
-      note: "captcha",
+      note,
     })
   );
 }

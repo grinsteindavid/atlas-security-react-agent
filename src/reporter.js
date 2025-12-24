@@ -115,6 +115,23 @@ function extractFindings(state) {
         });
       }
     }
+
+    // CAPTCHA answer leakage
+    if (obs.note?.includes("captcha answer leaked")) {
+      const key = `captcha_leak:${new URL(url).pathname}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        findings.push({
+          type: "broken_access_control",
+          subtype: "captcha_bypass",
+          severity: "medium",
+          path: new URL(url).pathname,
+          evidence: "CAPTCHA answer exposed in API response",
+          owasp: "A01:2021-Broken Access Control",
+          observationId: obs.id,
+        });
+      }
+    }
   }
 
   return findings;
