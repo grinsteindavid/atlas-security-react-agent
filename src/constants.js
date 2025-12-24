@@ -33,6 +33,43 @@ export const ALLOWED_TOOLS = [
 ];
 
 /**
+ * Tool definitions with descriptions for LLM context.
+ * @type {object[]}
+ */
+export const TOOL_DEFINITIONS = [
+  {
+    name: "http_get",
+    description: "GET request to discover endpoints and content",
+    args: { path: "string (required)", label: "string (optional)" },
+  },
+  {
+    name: "http_post",
+    description: "POST JSON to test API endpoints",
+    args: { path: "string", body: "object (optional)", label: "string (optional)" },
+  },
+  {
+    name: "inspect_headers",
+    description: "Check security headers (CSP, HSTS, CORS)",
+    args: { path: "string" },
+  },
+  {
+    name: "provoke_error",
+    description: "Send malformed JSON to surface error messages",
+    args: { path: "string" },
+  },
+  {
+    name: "measure_timing",
+    description: "Compare response times between control and test payloads",
+    args: { path: "string", control: "object", test: "object" },
+  },
+  {
+    name: "captcha_fetch",
+    description: "Fetch CAPTCHA endpoint to check for answer leakage",
+    args: { path: "string (default: /rest/captcha)" },
+  },
+];
+
+/**
  * Regex patterns matching API-like paths.
  * @type {RegExp[]}
  */

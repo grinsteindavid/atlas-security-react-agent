@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { runOnce } from "./graph.js";
 import { TARGET_URL, WAIT_FOR_TARGET_MS, WAIT_FOR_TARGET_INTERVAL_MS } from "./config.js";
 

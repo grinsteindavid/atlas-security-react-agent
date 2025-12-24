@@ -54,4 +54,33 @@ function toObservation(resp, meta) {
   };
 }
 
-export { client, toObservation };
+/**
+ * Get a summary of current session/cookie state.
+ * @returns {Promise<object>}
+ */
+async function getSessionSummary() {
+  try {
+    const cookies = await jar.getCookies(process.env.TARGET_URL ?? "http://localhost:3000");
+    const cookieNames = cookies.map((c) => c.key);
+    const authIndicators = cookieNames.filter((name) =>
+      /token|session|auth|jwt|sid|id/i.test(name)
+    );
+    return {
+      hasCookies: cookies.length > 0,
+      cookieCount: cookies.length,
+      cookieNames: cookieNames.slice(0, 10),
+      authIndicators,
+      hasAuthCookies: authIndicators.length > 0,
+    };
+  } catch {
+    return {
+      hasCookies: false,
+      cookieCount: 0,
+      cookieNames: [],
+      authIndicators: [],
+      hasAuthCookies: false,
+    };
+  }
+}
+
+export { client, toObservation, getSessionSummary };

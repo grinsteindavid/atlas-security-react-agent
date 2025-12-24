@@ -1,49 +1,82 @@
 import { z } from "zod";
 import { ChatOpenAI } from "@langchain/openai";
-import { MAX_REQ_PER_RUN, MAX_HOPS, MAX_HITS_PER_PATH } from "./config.js";
-import { ALLOWED_TOOLS, MAX_ACTIONS_PER_DECISION } from "./constants.js";
+import { MAX_REQ_PER_RUN, MAX_HOPS } from "./config.js";
+import { ALLOWED_TOOLS, MAX_ACTIONS_PER_DECISION, TOOL_DEFINITIONS } from "./constants.js";
 import { scorePath } from "./pathUtils.js";
+import { extractFindings } from "./reporter.js";
+import { getSessionSummary } from "./httpClient.js";
+
+/**
+ * Schema for action arguments (flexible for all tools).
+ */
+const ActionArgsSchema = z.object({
+  path: z.string(),
+  label: z.string().optional(),
+  body: z.record(z.unknown()).optional(),
+  control: z.record(z.unknown()).optional(),
+  test: z.record(z.unknown()).optional(),
+}).passthrough();
 
 /**
  * Schema for a single action in batch execution.
  */
 const ActionSchema = z.object({
   tool: z.enum(ALLOWED_TOOLS),
-  args: z.object({
-    path: z.string(),
-    label: z.string().optional(),
-    body: z.record(z.unknown()).optional(),
-    control: z.record(z.unknown()).optional(),
-    test: z.record(z.unknown()).optional(),
-  }),
-  rationale: z.string(),
+  args: ActionArgsSchema,
+  rationale: z.string().optional().default(""),
 });
 
 /**
  * Zod schema for validating Cortex LLM responses.
- * Supports both legacy single-action and new batch actions.
  */
 const CortexResponseSchema = z.object({
-  decision: z.enum(["probe", "report"]),
-  // Legacy single action (backward compat)
-  next_tool: z.enum(ALLOWED_TOOLS).optional(),
-  next_args: z
-    .object({
-      path: z.string().optional(),
-      label: z.string().optional(),
-      body: z.record(z.unknown()).optional(),
-      control: z.record(z.unknown()).optional(),
-      test: z.record(z.unknown()).optional(),
-    })
-    .optional(),
-  // New batch actions
-  next_actions: z.array(ActionSchema).max(MAX_ACTIONS_PER_DECISION).optional(),
+  decision: z.enum(["probe", "report", "continue"]).transform((val) =>
+    val === "continue" ? "probe" : val
+  ),
+  next_actions: z.array(ActionSchema).max(MAX_ACTIONS_PER_DECISION).optional().default([]),
   thought: z.string(),
   hypothesis: z.string(),
   owasp_category: z.string(),
   confidence_0_1: z.number().min(0).max(1),
-  observation_ref: z.string().nullable(),
+  observation_ref: z.union([z.string(), z.null()]).optional().default(null),
 });
+
+/**
+ * Build system prompt with tool definitions.
+ * @returns {string}
+ */
+function buildSystemPrompt() {
+  const toolsText = TOOL_DEFINITIONS.map(
+    (t) => `- ${t.name}: ${t.description}`
+  ).join("\n");
+
+  return `You are a security reconnaissance agent analyzing a web application.
+
+RESPONSE FORMAT: Raw JSON object (no markdown, no code fences).
+
+REQUIRED FIELDS:
+- decision: "probe" (continue testing) or "report" (finish)
+- next_actions: array of actions when decision is "probe"
+- thought: your reasoning process
+- hypothesis: what vulnerability you suspect
+- owasp_category: e.g. "A01:2021-Broken Access Control"
+- confidence_0_1: 0.0-1.0 confidence level
+- observation_ref: ID from observations or null
+
+ACTION FORMAT: {"tool": "tool_name", "args": {"path": "/endpoint"}, "rationale": "why"}
+
+AVAILABLE TOOLS:
+${toolsText}
+
+STRATEGY:
+- Check candidateScores for high-priority unvisited paths
+- Prioritize API endpoints (/api/*, /rest/*) and auth paths
+- Skip paths already in currentFindings
+- Avoid paths in recentErrors
+- Vary tools: GET → inspect_headers → provoke_error
+
+CONFIDENCE: 0.1-0.3 speculation | 0.4-0.6 indirect evidence | 0.7-0.9 confirmed`;
+}
 
 /**
  * Validate raw LLM output against the Cortex schema.
@@ -100,69 +133,40 @@ async function runCortex(state) {
   });
 
   const latest = state.observations.at(-1);
-  const allowedTools = [
-    "http_get",
-    "http_post",
-    "inspect_headers",
-    "provoke_error",
-    "measure_timing",
-    "captcha_fetch",
-  ];
 
+  // Build context for LLM
   const remainingBudget = Math.max(0, (MAX_REQ_PER_RUN ?? 0) - (state.metrics?.requests ?? 0));
   const remainingHops = Math.max(0, (MAX_HOPS ?? 0) - (state.hops ?? 0));
   const candidateScores = state.candidates
     .slice(0, 15)
     .map((p) => scorePath(p, state))
     .sort((a, b) => b.score - a.score);
-  const lastDecisions = state.decisions.slice(-5);
-  const pathStatsSummary = Object.entries(state.pathStats ?? {})
-    .map(([path, stat]) => ({
-      path,
-      hits: stat.hits ?? 0,
-      lastStatus: stat.lastStatus ?? null,
-      lastTool: stat.lastTool ?? null,
-    }))
-    .sort((a, b) => b.hits - a.hits)
-    .slice(0, 10);
+
+  const currentFindings = extractFindings(state).map((f) => ({
+    type: f.subtype,
+    path: f.path,
+    owasp: f.owasp,
+  }));
+
+  const sessionState = await getSessionSummary();
+
+  const recentErrors = (state.metrics?.errors ?? []).slice(-5).map((e) => ({
+    path: e.path ?? e.url,
+    tool: e.tool,
+  }));
 
   const prompt = [
-    {
-      role: "system",
-      content:
-        "You are the Cortex of a security reconnaissance agent. Your goal is to LEARN attacker thinking by forming hypotheses and gathering evidence.\n\n" +
-        "OUTPUT: RAW JSON only (no code fences, no prose).\n" +
-        "SCHEMA: {decision, next_actions[], thought, hypothesis, owasp_category, confidence_0_1, observation_ref}\n\n" +
-        "REASONING CYCLE (ReAct):\n" +
-        "1. HYPOTHESIZE: Based on observations, what vulnerability might exist? Map to OWASP category.\n" +
-        "2. PLAN: Which tools would provide evidence for/against this hypothesis?\n" +
-        "3. ACT: Specify 1-5 actions in next_actions array to execute in parallel.\n" +
-        "4. EVALUATE: After results, adjust hypothesis confidence based on evidence.\n\n" +
-        "NEXT_ACTIONS FORMAT (array of 1-5 actions):\n" +
-        "[{tool, args: {path, label?, body?, control?, test?}, rationale}]\n" +
-        "Tools: http_get, http_post, inspect_headers, provoke_error, measure_timing, captcha_fetch\n\n" +
-        "CONFIDENCE CALIBRATION:\n" +
-        "- 0.1-0.3: Speculation (pattern suggests possibility, no evidence yet)\n" +
-        "- 0.4-0.6: Indirect evidence (e.g., 401 response hints at auth, but unconfirmed)\n" +
-        "- 0.7-0.9: Direct evidence (e.g., stack trace exposed, data leaked, header missing)\n\n" +
-        "PRIORITY TARGETS:\n" +
-        "- API endpoints: /api/*, /rest/*, /graphql (data exposure, auth flaws)\n" +
-        "- Auth flows: login, register, password reset, token endpoints\n" +
-        "- Sensitive paths: /admin, /swagger, /debug, /.git, /backup\n\n" +
-        "THOUGHT & HYPOTHESIS are the primary learning artifacts. Explain your reasoning clearly.\n" +
-        "Cite observation_ref from inputs. No exploit payloads. Respect budget.",
-    },
+    { role: "system", content: buildSystemPrompt() },
     {
       role: "user",
       content: JSON.stringify({
         observations: state.observations.slice(-8),
         remainingBudget,
         remainingHops,
-        visitedPaths: state.visitedPaths,
-        candidates: state.candidates.slice(0, 15),
-        candidateScores,
-        lastDecisions,
-        pathStatsSummary,
+        candidateScores: candidateScores.slice(0, 10),
+        currentFindings,
+        sessionState,
+        recentErrors,
         captcha: state.captcha,
       }),
     },
@@ -170,7 +174,11 @@ async function runCortex(state) {
 
   async function requestDecision() {
     const res = await model.invoke(prompt);
-    const text = res.content;
+    let text = res.content;
+    // Strip markdown code fences if present
+    if (typeof text === "string") {
+      text = text.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
+    }
     const parsed = typeof text === "string" ? JSON.parse(text) : text;
     return validateCortexResponse(parsed);
   }
