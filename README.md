@@ -8,36 +8,36 @@ ATLAS is an **educational tool** designed to:
 
 1. **Learn attacker cognition** — Model the Hypothesize → Plan → Act → Evaluate cycle
 2. **Generate evidence, not exploits** — Observe and document, never attack
-3. **Produce learning artifacts** — Clear reasoning traces for review and study
+3. **Produce learning artifacts** — Clear reasoning traces with executive summaries
 
-The agent forms security hypotheses, gathers evidence through safe reconnaissance, and outputs structured findings mapped to OWASP categories.
+The agent forms security hypotheses, gathers evidence through safe reconnaissance, and outputs structured findings mapped to OWASP categories with an LLM-generated executive summary.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    LangGraph StateGraph                  │
-│                                                         │
-│   ┌─────────┐     ┌─────────┐     ┌──────────┐        │
-│   │  Probe  │────▶│ Cortex  │────▶│ Reporter │        │
-│   │ (Tools) │◀────│  (LLM)  │     │ (Trace)  │        │
-│   └─────────┘     └─────────┘     └──────────┘        │
-│        │                │                              │
-│        ▼                ▼                              │
-│   Parallel HTTP    Hypothesis-First                    │
-│   Execution        Reasoning                           │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                    LangGraph StateGraph                       │
+│                                                              │
+│   ┌─────────┐     ┌─────────┐     ┌──────────┐              │
+│   │  Probe  │────▶│ Cortex  │────▶│ Reporter │              │
+│   │ (Tools) │◀────│  (LLM)  │     │ (Trace)  │              │
+│   └─────────┘     └─────────┘     └──────────┘              │
+│        │                │               │                    │
+│        ▼                ▼               ▼                    │
+│   Batch Parallel    Context-Aware   Executive                │
+│   Execution         Reasoning       Summary                  │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### Nodes
 
 | Node | Purpose |
 |------|---------|
-| **Probe** | Executes 1-5 tools in parallel per hop |
-| **Cortex** | LLM reasoning (GPT-4o-mini, temp 0) with hypothesis-first prompting |
-| **Reporter** | Writes structured trace with findings and OWASP mappings |
+| **Probe** | Executes 1-5 tools in parallel per hop (batch execution) |
+| **Cortex** | LLM reasoning with context: findings, session state, errors, hypotheses |
+| **Reporter** | Extracts findings, generates LLM executive summary, writes trace |
 
 ### Reasoning Cycle (ReAct)
 
@@ -65,9 +65,21 @@ The agent forms security hypotheses, gathers evidence through safe reconnaissanc
 | `inspect_headers` | Audit CSP, HSTS, CORS, server headers |
 | `provoke_error` | Send malformed JSON to surface verbose errors |
 | `measure_timing` | Compare control vs test request timing |
-| `captcha_fetch` | Fetch CAPTCHA metadata for form testing |
+| `captcha_fetch` | Fetch CAPTCHA endpoint, detect answer leakage vulnerabilities |
 
 All tools are **deterministic** — no LLM-generated payloads.
+
+### Cortex Context
+
+The LLM receives rich context for informed decisions:
+
+| Context | Purpose |
+|---------|---------|
+| `candidateScores` | Discovered paths ranked by priority |
+| `currentFindings` | Already detected vulnerabilities (avoid re-investigation) |
+| `sessionState` | Cookie/auth status for auth-aware decisions |
+| `recentErrors` | Failed requests to avoid retrying |
+| `visitedPaths` | Paths already explored |
 
 ---
 
@@ -175,33 +187,53 @@ Each run produces `traces/trace-<timestamp>.json`:
 {
   "run_id": "2025-12-24T08-00-00-000Z",
   "target": "http://target:3000",
+  "executiveSummary": "### Executive Summary\n\n**Overall Security Posture**\nThe reconnaissance revealed several security misconfigurations...\n\n**Critical Findings**\nThe captcha bypass vulnerability at /rest/captcha could allow automated attacks...\n\n**Recommended Next Steps**\nImplement HSTS and CSP headers, fix captcha answer leakage...",
   "summary": {
-    "findingsCount": 5,
+    "findingsCount": 10,
     "owaspCategories": [
+      { "category": "A01:2021-Broken Access Control", "count": 5 },
       { "category": "A05:2021-Security Misconfiguration", "count": 3 }
     ],
-    "toolUsage": { "http_get": 12, "inspect_headers": 4, "provoke_error": 3 },
-    "batchStats": { "totalBatches": 8, "totalActions": 24 }
+    "toolUsage": { "http_get": 7, "http_post": 4, "inspect_headers": 10, "provoke_error": 10, "captcha_fetch": 8 },
+    "batchStats": { "totalBatches": 10, "totalActions": 38 }
   },
   "findings": [
+    {
+      "type": "broken_access_control",
+      "subtype": "captcha_bypass",
+      "severity": "medium",
+      "path": "/rest/captcha",
+      "evidence": "CAPTCHA answer exposed in API response",
+      "owasp": "A01:2021-Broken Access Control"
+    },
     {
       "type": "security_misconfiguration",
       "subtype": "missing_csp",
       "severity": "low",
+      "path": "/",
       "evidence": "No Content-Security-Policy header",
       "owasp": "A05:2021-Security Misconfiguration"
     }
   ],
   "reasoningLog": [
     {
-      "thought": "The API returns JSON without auth headers...",
-      "hypothesis": "API endpoints may lack authentication",
+      "thought": "The /rest/captcha endpoint returns the answer in the response...",
+      "hypothesis": "CAPTCHA can be bypassed by reading the answer from API",
       "owasp_category": "A01:2021-Broken Access Control",
-      "confidence_0_1": 0.6
+      "confidence_0_1": 0.8
     }
-  ]
+  ],
+  "candidates": ["/api/Users", "/rest/user/login", "/#/administration"]
 }
 ```
+
+### Executive Summary
+
+The reporter generates an **LLM-powered executive summary** covering:
+- Overall security posture assessment
+- Most critical findings and impact
+- Attack surface observations
+- Recommended next steps
 
 ---
 
@@ -237,12 +269,15 @@ src/
 
 The agent typically detects:
 
-- ❌ Missing HSTS header
-- ❌ Missing Content-Security-Policy
-- ❌ CORS wildcard (`Access-Control-Allow-Origin: *`)
-- ❌ Server/version disclosure
-- ❌ Verbose error responses (stack traces)
-- ❌ Unprotected API endpoints
+| Finding | Severity | OWASP |
+|---------|----------|-------|
+| CAPTCHA answer leakage | Medium | A01:2021 |
+| Stack trace disclosure | Medium | A05:2021 |
+| Missing HSTS header | Low | A05:2021 |
+| Missing CSP header | Low | A05:2021 |
+| CORS wildcard | Low | A05:2021 |
+| Auth error details exposed | Low | A01:2021 |
+| Server banner disclosure | Info | A05:2021 |
 
 ---
 
