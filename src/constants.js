@@ -103,7 +103,7 @@ export const DIVERSITY_INTERVAL = 5;
  * Tools that must be used periodically for coverage.
  * @type {string[]}
  */
-export const REQUIRED_DIVERSITY_TOOLS = ["inspect_headers", "provoke_error"];
+export const REQUIRED_DIVERSITY_TOOLS = ["inspect_headers", "provoke_error", "measure_timing"];
 
 /**
  * Confidence calibration guidelines for hypothesis scoring.

@@ -133,6 +133,75 @@ function extractFindings(state) {
         });
       }
     }
+
+    // Sensitive key/credential file exposure
+    const pathname = new URL(url).pathname;
+    if (
+      pathname.includes("encryptionkey") ||
+      pathname.includes("key") ||
+      pathname.includes("secret")
+    ) {
+      const keyFilePattern = /\.(key|pem|pub|crt|cer|p12|pfx|jks)(["\]\s,]|$)/i;
+      const keyListPattern = /\[\s*["'][^"']+\.(key|pub|pem)["']/i;
+      if (keyFilePattern.test(body) || keyListPattern.test(body)) {
+        const key = `key_exposure:${pathname}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          findings.push({
+            type: "sensitive_data_exposure",
+            subtype: "encryption_key_exposure",
+            severity: "high",
+            path: pathname,
+            evidence: "Encryption key files exposed via API",
+            owasp: "A01:2021-Broken Access Control",
+            observationId: obs.id,
+          });
+        }
+      }
+    }
+
+    // Metrics endpoint exposure (Prometheus, etc.)
+    if (
+      pathname.includes("/metrics") &&
+      obs.status === 200 &&
+      (body.includes("# HELP") || body.includes("# TYPE") || body.includes("_total") || body.includes("_seconds"))
+    ) {
+      const key = "metrics_exposure";
+      if (!seen.has(key)) {
+        seen.add(key);
+        findings.push({
+          type: "information_disclosure",
+          subtype: "metrics_exposure",
+          severity: "medium",
+          path: pathname,
+          evidence: "Prometheus/metrics endpoint publicly accessible",
+          owasp: "A05:2021-Security Misconfiguration",
+          observationId: obs.id,
+        });
+      }
+    }
+
+    // Admin/config endpoint without authentication
+    if (
+      (pathname.includes("/admin") || pathname.includes("/config")) &&
+      obs.status === 200 &&
+      body.includes("config") &&
+      !body.includes("UnauthorizedError")
+    ) {
+      const key = `config_exposure:${pathname}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        findings.push({
+          type: "security_misconfiguration",
+          subtype: "unprotected_admin_config",
+          severity: "high",
+          path: pathname,
+          evidence: "Admin/config endpoint accessible without authentication",
+          owasp: "A01:2021-Broken Access Control",
+          observationId: obs.id,
+        });
+      }
+    }
   }
 
   return findings;

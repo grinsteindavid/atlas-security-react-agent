@@ -134,6 +134,73 @@ describe("extractFindings", () => {
     expect(extractFindings({ observations: null })).toEqual([]);
     expect(extractFindings({})).toEqual([]);
   });
+
+  test("detects encryption key file exposure", () => {
+    const state = {
+      observations: [
+        createObservation({
+          url: "http://localhost:3000/encryptionkeys",
+          bodySnippet: '["jwt.pub","premium.key"]',
+        }),
+      ],
+    };
+    const findings = extractFindings(state);
+    const keyFinding = findings.find((f) => f.subtype === "encryption_key_exposure");
+    expect(keyFinding).toBeDefined();
+    expect(keyFinding.type).toBe("sensitive_data_exposure");
+    expect(keyFinding.severity).toBe("high");
+    expect(keyFinding.owasp).toBe("A01:2021-Broken Access Control");
+  });
+
+  test("detects metrics endpoint exposure", () => {
+    const state = {
+      observations: [
+        createObservation({
+          url: "http://localhost:3000/metrics",
+          status: 200,
+          bodySnippet: "# HELP process_cpu_seconds_total Total CPU\n# TYPE process_cpu_seconds_total counter",
+        }),
+      ],
+    };
+    const findings = extractFindings(state);
+    const metricsFinding = findings.find((f) => f.subtype === "metrics_exposure");
+    expect(metricsFinding).toBeDefined();
+    expect(metricsFinding.type).toBe("information_disclosure");
+    expect(metricsFinding.severity).toBe("medium");
+  });
+
+  test("detects unprotected admin config endpoint", () => {
+    const state = {
+      observations: [
+        createObservation({
+          url: "http://localhost:3000/rest/admin/application-configuration",
+          status: 200,
+          bodySnippet: '{"config":{"server":{"port":3000},"application":{"name":"App"}}}',
+        }),
+      ],
+    };
+    const findings = extractFindings(state);
+    const configFinding = findings.find((f) => f.subtype === "unprotected_admin_config");
+    expect(configFinding).toBeDefined();
+    expect(configFinding.type).toBe("security_misconfiguration");
+    expect(configFinding.severity).toBe("high");
+    expect(configFinding.owasp).toBe("A01:2021-Broken Access Control");
+  });
+
+  test("does not flag admin config if auth required", () => {
+    const state = {
+      observations: [
+        createObservation({
+          url: "http://localhost:3000/rest/admin/application-configuration",
+          status: 401,
+          bodySnippet: '{"error":{"name":"UnauthorizedError"}}',
+        }),
+      ],
+    };
+    const findings = extractFindings(state);
+    const configFinding = findings.find((f) => f.subtype === "unprotected_admin_config");
+    expect(configFinding).toBeUndefined();
+  });
 });
 
 describe("summarizeOwaspCategories", () => {
